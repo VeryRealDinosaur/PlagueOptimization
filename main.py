@@ -59,6 +59,7 @@ def n_hat_lp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
+    print("lp_done")
     return sp.integrate.nquad(integrand, for_range)
 
 def n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
@@ -66,6 +67,7 @@ def n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
+    print("hp_done")
     return sp.integrate.nquad(integrand, for_range)
 
 def n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
@@ -73,6 +75,7 @@ def n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
+    print("hl_done")
     return sp.integrate.nquad(integrand, for_range)
 
 def n_hat_p0(mu_3,sigma_3):
@@ -80,6 +83,7 @@ def n_hat_p0(mu_3,sigma_3):
         return distribution(p0,mu_3,sigma_3)
 
     for_range = [[-np.inf, np.inf]]
+    print("p0_done")
     return sp.integrate.nquad(integrand, for_range)
 """
 def exp_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
