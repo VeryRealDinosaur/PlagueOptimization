@@ -3,6 +3,7 @@ import scipy as sp
 from scipy.stats import norm
 import time
 from scipy import optimize
+import concurrent.futures
 
 h=[0,9,17,17,26,23,20,19,12,6,10,0,0,0]
 l=[0,3,14,50,74,56,40,126,40,37,36,48,76,91]
@@ -115,20 +116,67 @@ def exp_p0(mu_3,sigma_3):
     return sp.integrate.nquad(integrand, for_range)[0]
 
 def addition(params, t, h, l, p, p0i):
-    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
-    suma = 0
-    for i in range(2):
-        suma += (h[i]-exp_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t))**2 \
-               +(l[i]-exp_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t))**2 \
-               +(p[i]-exp_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t))**2 \
-               +(p0i-exp_p0(mu_3,sigma_3))**2
+    mu_0 = params[0]
+    sigma_0 = params[1]
+    mu_1 = params[2]
+    sigma_1 = params[3]
+    mu_2 = params[4]
+    sigma_2 = params[5]
+    mu_3 = params[6]
+    sigma_3 = params[7]
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = {
+            'exp_h': executor.submit(exp_h,
+                                     mu_0,
+                                     sigma_0,
+                                     mu_1,
+                                     sigma_1,
+                                     mu_2,
+                                     sigma_2,
+                                     mu_3,
+                                     sigma_3,
+                                     t),
+            'exp_l': executor.submit(exp_l,
+                                     mu_0,
+                                     sigma_0,
+                                     mu_1,
+                                     sigma_1,
+                                     mu_2,
+                                     sigma_2,
+                                     mu_3,
+                                     sigma_3,
+                                     t),
+            'exp_p': executor.submit(exp_p,
+                                     mu_0,
+                                     sigma_0,
+                                     mu_1,
+                                     sigma_1,
+                                     mu_2,
+                                     sigma_2,
+                                     mu_3,
+                                     sigma_3,
+                                     t),
+            'exp_p0': executor.submit(exp_p0,
+                                      mu_3,
+                                      sigma_3)
+        }
+
+        results = {key: future.result() for key, future in futures.items()}
+
+    suma = sum((h[i] - results['exp_h']) ** 2 +
+               (l[i] - results['exp_l']) ** 2 +
+               (p[i] - results['exp_p']) ** 2 +
+               (p0i - results['exp_p0']) ** 2 for i in range(2))
+
     return suma
 
 x0 = [1, 1, 1, 1, 1, 1, 1, 1]
+if __name__ == '__main__':
+    start_time = time.time()
+    result_bfgs = optimize.minimize(fun=addition, x0=x0,
+                                    args=(2, h, l, p, 1),
+                                    method='BFGS')
 
-start_time = time.time()
-result_nelder = optimize.minimize(fun=addition, x0=x0,
-                                  args=(2, h, l, p, 1),
-                                  method='Nelder-Mead')
-print(result_nelder)
-print("--- %s seconds ---" % (time.time() - start_time))
+    print(result_bfgs)
+    print("--- %s seconds ---" % (time.time() - start_time))
