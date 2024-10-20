@@ -1,3 +1,4 @@
+import cProfile
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
@@ -5,9 +6,11 @@ import scipy as sp
 from scipy.stats import norm
 import time
 from scipy import optimize
-import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import lru_cache
 import numba
+import pstats
+import io
 
 h=[0,9,17,17,26,23,20,19,12,6,10,0,0,0]
 l=[0,3,14,50,74,56,40,126,40,37,36,48,76,91]
@@ -118,25 +121,57 @@ def exp_p0(mu_3,sigma_3):
     for_range = [[-np.inf, np.inf]]
     return sp.integrate.nquad(integrand, for_range)[0]
 
+
 def addition(params, t, h, l, p, p0i):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
 
-    suma = sum(
-        (h[i] - exp_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2 +
-        (l[i] - exp_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2 +
-        (p[i] - exp_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2 +
-        (p0i - exp_p0(mu_3, sigma_3)) ** 2
-        for i in range(len(t))
-    )
+    with ProcessPoolExecutor() as executor:
+        futures = {}
+
+        for i in range(len(t)):
+            futures[executor.submit(exp_h, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
+            futures[executor.submit(exp_l, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
+            futures[executor.submit(exp_p, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
+
+        suma = 0
+        for future in as_completed(futures):
+            i = futures[future]
+            try:
+                result = future.result()
+                if future.fn == exp_h:
+                    suma += (h[i] - result) ** 2
+                elif future.fn == exp_l:
+                    suma += (l[i] - result) ** 2
+                elif future.fn == exp_p:
+                    suma += (p[i] - result) ** 2
+            except Exception as e:
+                print(f"Error occurred for index {i}: {e}")
+
+        suma += (p0i - exp_p0(mu_3, sigma_3)) ** 2
 
     return suma
 
-x0 = [1, 1, 1, 1, 1, 1, 1, 1]
-if __name__ == '__main__':
-    start_time = time.time()
+x0 = [np.mean(h), np.std(h), np.mean(l), np.std(l), np.mean(l), np.std(l), 10, 1]
+
+def main():
     result_bfgs = optimize.minimize(fun=addition, x0=x0,
                                     args=(t, h, l, p, 10),
                                     method='BFGS')
 
     print(result_bfgs)
-    print("--- %s seconds ---" % (time.time() - start_time))
+
+if __name__ == '__main__':
+    pr = cProfile.Profile()
+    pr.enable()
+
+    main()
+
+    pr.disable()
+
+    # Create a stats object to analyze the profile
+    s = io.StringIO()
+    sortby = 'cumulative'  # You can change this to 'time', 'calls', etc.
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+
+    print(s.getvalue())
