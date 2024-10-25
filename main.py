@@ -8,12 +8,34 @@ from functools import lru_cache
 import pstats
 import io
 
-h=[0,9,17,17,26,23,20,19,12,6,10,0,0,0]
-l=[0,3,14,50,74,56,40,126,40,37,36,48,76,91]
-p=[0,0,0,0,0,0,0,3,4,2,0,5,2,9]
-t=[0,7,10,14,17,21,25,29,32,36,40,45,52,57]
+from Test import mu_sigma
 
-@lru_cache(maxsize=None)
+
+#DEBUGING TOOLS
+def create_callback(t, h, l, p, p0i):
+    def callback(xk):
+        callback.count += 1
+
+        fval = addition(xk, t, h, l, p, p0i)
+
+        print(f"\nIteration {callback.count}:")
+        print(f"  Parameters:")
+        print(f"    μ₀: {xk[0]:.4f}, σ₀: {xk[1]:.4f}")
+        print(f"    μ₁: {xk[2]:.4f}, σ₁: {xk[3]:.4f}")
+        print(f"    μ₂: {xk[4]:.4f}, σ₂: {xk[5]:.4f}")
+        print(f"    μ₃: {xk[6]:.4f}, σ₃: {xk[7]:.4f}")
+        print(f"  Function value: {fval:.6f}")
+
+    callback.count = 0
+    return callback
+
+
+h=[9,17,17,26,23,20,19,12,6,10,1,1,1]
+l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
+p=[1,1,1,1,1,1,3,4,2,1,5,2,9]
+t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
+
+@lru_cache(maxsize=300)
 def matrix_power(s0,s1,f2,t):
     a = np.array([[0, 0, f2],
                   [s0, 0, 0],
@@ -66,7 +88,6 @@ def n_hat_lp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    print("lp_done")
     return sp.integrate.nquad(integrand, for_range)[0]
 
 def n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
@@ -74,7 +95,6 @@ def n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    print("hp_done")
     return sp.integrate.nquad(integrand, for_range)[0]
 
 def n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
@@ -82,7 +102,6 @@ def n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
         return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
 
     for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    print("hl_done")
     return sp.integrate.nquad(integrand, for_range)[0]
 
 def n_hat_p0(mu_3,sigma_3):
@@ -90,7 +109,6 @@ def n_hat_p0(mu_3,sigma_3):
         return distribution(p0,mu_3,sigma_3)
 
     for_range = [[-np.inf, np.inf]]
-    print("p0_done")
     return sp.integrate.nquad(integrand, for_range)[0]
 
 def exp_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
@@ -118,8 +136,8 @@ def exp_p0(mu_3,sigma_3):
     return sp.integrate.nquad(integrand, for_range)[0]
 
 
-def addition(params, t, h, l, p, p0i):
-    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
+def addition(params, mu_3, sigma_3, t, h, l, p, p0i):
+    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2 = params
 
     with ProcessPoolExecutor() as executor:
         futures = {}
@@ -170,16 +188,32 @@ def starting_points(h,l,p,t):
 
     return mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2
 
-mu_sigma = starting_points(h,l,p,t)
+mu0, sigma0, mu1, sigma1, mu2, sigma2 = starting_points(h,l,p,t)
 
-x0 = np.concatenate((mu_sigma, [10, 1]))
+bounds = [
+    (-5, 5),    # bounds for x[0]
+    (0, 10),    # bounds for x[1]
+    (-2, 8),    # bounds for x[2]
+    (-3, 3),    # bounds for x[3]
+    (0, 15),    # bounds for x[4]
+    (-10, 0),   # bounds for x[5]
+    (1, 7),     # bounds for x[6]
+    (-8, -2)    # bounds for x[7]
+]
 
 def main():
-    result_bfgs = optimize.minimize(fun=addition, x0=x0,
-                                    args=(t, h, l, p, 10),
-                                    method='BFGS')
-
-    print(result_bfgs)
+    print(mu0, sigma0, mu1, sigma1, mu2, sigma2)
+    x0=starting_points(h,l,p,t)
+    callback = create_callback(t, h, l, p, 10)
+    result = optimize.minimize(
+        fun=addition,
+        x0=x0,
+        args=(mut, h, l, p, 10),
+        method='nelder-mead',
+        callback=callback
+    )
+    print("\nOptimización Completada:")
+    print(result)
 
 if __name__ == '__main__':
     pr = cProfile.Profile()
@@ -189,9 +223,8 @@ if __name__ == '__main__':
 
     pr.disable()
 
-    # Create a stats object to analyze the profile
     s = io.StringIO()
-    sortby = 'cumulative'  # You can change this to 'time', 'calls', etc.
+    sortby = 'cumulative'
     ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
     ps.print_stats()
 
