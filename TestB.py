@@ -3,7 +3,6 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import lru_cache
 import pstats
-import io
 import torch
 from torchquad import MonteCarlo, set_up_backend
 
