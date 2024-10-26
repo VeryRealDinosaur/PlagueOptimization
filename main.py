@@ -1,15 +1,12 @@
-import cProfile
+""""import cProfile
 import numpy as np
 import scipy as sp
-from scipy.stats import norm, variation
+from scipy.stats import norm
 from scipy import optimize
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import lru_cache
 import pstats
 import io
-
-from Test import mu_sigma
-
 
 #DEBUGING TOOLS
 def create_callback(t, h, l, p, p0i):
@@ -29,13 +26,12 @@ def create_callback(t, h, l, p, p0i):
     callback.count = 0
     return callback
 
+h=[9,17,18] #,26,23,20,19,12,6,10,1,1,1]
+l=[3,14,50] #,74,56,40,126,40,37,36,48,76,91]
+p=[1,1,2] #,1,1,1,3,4,2,1,5,2,9]
+t=[7,10,14] #,17,21,25,29,32,36,40,45,52,57]
 
-h=[9,17,17,26,23,20,19,12,6,10,1,1,1]
-l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
-p=[1,1,1,1,1,1,3,4,2,1,5,2,9]
-t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
-
-@lru_cache(maxsize=300)
+@lru_cache(maxsize=128)
 def matrix_power(s0,s1,f2,t):
     a = np.array([[0, 0, f2],
                   [s0, 0, 0],
@@ -136,27 +132,31 @@ def exp_p0(mu_3,sigma_3):
     return sp.integrate.nquad(integrand, for_range)[0]
 
 
-def addition(params, mu_3, sigma_3, t, h, l, p, p0i):
-    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2 = params
+def addition(params, t, h, l, p, p0i):
+    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
 
     with ProcessPoolExecutor() as executor:
-        futures = {}
+        futures_info = {}
 
         for i in range(len(t)):
-            futures[executor.submit(exp_h, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
-            futures[executor.submit(exp_l, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
-            futures[executor.submit(exp_p, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])] = i
+            future_h = executor.submit(exp_h, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
+            future_l = executor.submit(exp_l, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
+            future_p = executor.submit(exp_p, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
+
+            futures_info[future_h] = ('h', i)
+            futures_info[future_l] = ('l', i)
+            futures_info[future_p] = ('p', i)
 
         suma = 0
-        for future in as_completed(futures):
-            i = futures[future]
+        for future in as_completed(futures_info):
+            func_type, i = futures_info[future]
             try:
                 result = future.result()
-                if future.fn == exp_h:
+                if func_type == 'h':
                     suma += (h[i] - result) ** 2
-                elif future.fn == exp_l:
+                elif func_type == 'l':
                     suma += (l[i] - result) ** 2
-                elif future.fn == exp_p:
+                elif func_type == 'p':
                     suma += (p[i] - result) ** 2
             except Exception as e:
                 print(f"Error occurred for index {i}: {e}")
@@ -186,29 +186,14 @@ def starting_points(h,l,p,t):
     sigma_1 = np.sqrt(variance_1)
     sigma_2 = np.sqrt(variance_2)
 
-    return mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2
-
-mu0, sigma0, mu1, sigma1, mu2, sigma2 = starting_points(h,l,p,t)
-
-bounds = [
-    (-5, 5),    # bounds for x[0]
-    (0, 10),    # bounds for x[1]
-    (-2, 8),    # bounds for x[2]
-    (-3, 3),    # bounds for x[3]
-    (0, 15),    # bounds for x[4]
-    (-10, 0),   # bounds for x[5]
-    (1, 7),     # bounds for x[6]
-    (-8, -2)    # bounds for x[7]
-]
+    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 10, 1])
 
 def main():
-    print(mu0, sigma0, mu1, sigma1, mu2, sigma2)
-    x0=starting_points(h,l,p,t)
     callback = create_callback(t, h, l, p, 10)
     result = optimize.minimize(
         fun=addition,
-        x0=x0,
-        args=(mut, h, l, p, 10),
+        x0=starting_points(h,l,p,t),
+        args=(t, h, l, p, 10),
         method='nelder-mead',
         callback=callback
     )
