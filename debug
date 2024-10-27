@@ -8,81 +8,80 @@ set_up_backend("torch", data_type="float64")
 
 vegas = VEGAS()
 
+@lru_cache(maxsize=128)
 def matrix_power(s0, s1, f2, t):
-    a = torch.tensor([[0.0, 0.0, f2],
-                      [s0, 0.0, 0.0],
-                      [0.0, s1, 0.0]], dtype=torch.float64)
-    return torch.matrix_power(a, t)
+    # Create batch matrices
+    batch_size = s0.shape[0]
+    a = torch.zeros((batch_size, 3, 3), dtype=torch.float64)
+
+    # Fill the matrices with the batch values
+    a[:, 0, 2] = f2  # First row, third column
+    a[:, 1, 0] = s0  # Second row, first column
+    a[:, 2, 1] = s1  # Third row, second column
+
+    # Calculate matrix power for each matrix in the batch
+    result = torch.matrix_power(a, t)
+    return result
 
 
 def p0(s0, s1, f2, h, l, p, t):
     a_n = matrix_power(s0, s1, f2, t)
-    if a_n[0, 2] != 0:
-        return a_n[0, 2] / h
-    elif a_n[1, 2] != 0:
-        return a_n[1, 2] / l
-    elif a_n[2, 2] != 0:
-        return a_n[2, 2] / p
-    else:
-        return torch.tensor(float('nan'), dtype=torch.float64)
+
+    # Create a mask for zero values to avoid division by zero
+    mask_0 = torch.abs(a_n[:, 0, 2]) > 1e-10
+    mask_1 = torch.abs(a_n[:, 1, 2]) > 1e-10
+    mask_2 = torch.abs(a_n[:, 2, 2]) > 1e-10
+
+    result = torch.zeros_like(s0)
+    result[mask_0] = a_n[mask_0, 0, 2] / h
+    result[~mask_0 & mask_1] = a_n[~mask_0 & mask_1, 1, 2] / l
+    result[~mask_0 & ~mask_1 & mask_2] = a_n[~mask_0 & ~mask_1 & mask_2, 2, 2] / p
+
+    return result
 
 
 def det(s0, s1, f2, t):
     a_n = matrix_power(s0, s1, f2, t)
-    if a_n[0, 2] != 0:
-        return 1 / a_n[0, 2]
-    elif a_n[1, 2] != 0:
-        return 1 / a_n[1, 2]
-    elif a_n[2, 2] != 0:
-        return 1 / a_n[2, 2]
-    else:
-        return torch.tensor(float('nan'), dtype=torch.float64)
 
+    # Create a mask for zero values to avoid division by zero
+    mask_0 = torch.abs(a_n[:, 0, 2]) > 1e-10
+    mask_1 = torch.abs(a_n[:, 1, 2]) > 1e-10
+    mask_2 = torch.abs(a_n[:, 2, 2]) > 1e-10
+
+    result = torch.zeros_like(s0)
+    result[mask_0] = 1 / a_n[mask_0, 0, 2]
+    result[~mask_0 & mask_1] = 1 / a_n[~mask_0 & mask_1, 1, 2]
+    result[~mask_0 & ~mask_1 & mask_2] = 1 / a_n[~mask_0 & ~mask_1 & mask_2, 2, 2]
+
+    return result
 
 def distribution(variable, mu, sigma):
     dist = Normal(mu, sigma)
     return torch.exp(dist.log_prob(variable))
 
-
-def fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t):  # Added Vegas-specific parameters
-
-    h = torch.tensor(h, dtype=torch.float64)
-    l = torch.tensor(l, dtype=torch.float64)
-    p = torch.tensor(p, dtype=torch.float64)
+def fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t):
 
     def integrand(x):
 
         s0, s1, f2 = x[:, 0], x[:, 1], x[:, 2]
 
-        results = torch.zeros_like(s0)
-        for i in range(len(s0)):
-            p0_result = p0(s0[i].item(), s1[i].item(), f2[i].item(), h, l, p, t)
-            det_result = det(s0[i].item(), s1[i].item(), f2[i].item(), t)
+        return (distribution(s0, mu_0, sigma_0) *
+                              distribution(s1, mu_1, sigma_1) *
+                              distribution(f2, mu_2, sigma_2) *
+                              distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+                              det(s0, s1, f2, t))
 
-            print(f"Debug - s0: {s0[i]}, s1: {s1[i]}, f2: {f2[i]}, p0: {p0_result}, det: {det_result}")
-
-            if not torch.isnan(p0_result) and not torch.isnan(det_result):
-                results[i] = (distribution(s0[i], mu_0, sigma_0) *
-                              distribution(s1[i], mu_1, sigma_1) *
-                              distribution(f2[i], mu_2, sigma_2) *
-                              distribution(p0_result, mu_3, sigma_3) *
-                              det_result)
-
-        return results.reshape(-1, 1)
-
-    domain = torch.tensor([
-        [mu_0 - 8 * sigma_0, mu_0 + 8 * sigma_0],
-        [mu_1 - 8 * sigma_1, mu_1 + 8 * sigma_1],
-        [mu_2 - 8 * sigma_2, mu_2 + 8 * sigma_2]
-    ], dtype=torch.float64)
-
-    result = vegas.integrate(integrand, dim=3, N=1000, integration_domain=domain)
-
+    domain = [
+        [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
+        [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
+        [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2]
+    ]
+    result = vegas.integrate(integrand, dim=3, N=10000, integration_domain=domain)
     return result.item()
 
-def main():
-    print(fun1(9, 2, 3, 3, 1, 3, 1, 0.5, 9, 3, 1, 7))
 
+def main():
+    print(fun1(10,2,10,2,10,2,10,2,13,12,4,2))
 
 if __name__ == "__main__":
     main()
