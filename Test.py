@@ -1,5 +1,6 @@
 import torch
 from functools import lru_cache
+from autoray.lazy import arctan
 from torch.distributions import Normal
 from torchquad import set_up_backend
 from torchquad.integration.monte_carlo import MonteCarlo
@@ -71,18 +72,23 @@ def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
 
         s0, s1, f2, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return (distribution(s0, mu_0, sigma_0) *
-                              distribution(s1, mu_1, sigma_1) *
-                              distribution(f2, mu_2, sigma_2) *
-                              distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                              det(s0, s1, f2, t))
+        return torch.atan((distribution(s0, mu_0, sigma_0) *
+             distribution(s1, mu_1, sigma_1) *
+             distribution(f2, mu_2, sigma_2) *
+             distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+             det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
+                                         distribution(s1, mu_1, sigma_1) *
+                                         distribution(f2, mu_2, sigma_2) *
+                                         distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+                                         det(s0, s1, f2, t)) ** 2)
+
 
     domain = [
         [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
         [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
         [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
-        [0, 50],
-        [0, 2]
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2],
     ]
     result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
     return result.item()
@@ -90,10 +96,10 @@ def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
 def expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(h):
 
-        return h*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t)
+        return torch.atan(h*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))/(1+(h*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))**2)
 
     domain = [
-        [0, 18]
+        [-np.pi / 2, np.pi / 2]
     ]
     result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
     return result.item()
@@ -123,18 +129,22 @@ def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
 
         s0, s1, f2, h, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return (distribution(s0, mu_0, sigma_0) *
-                              distribution(s1, mu_1, sigma_1) *
-                              distribution(f2, mu_2, sigma_2) *
-                              distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                              det(s0, s1, f2, t))
+        return torch.atan((distribution(s0, mu_0, sigma_0) *
+             distribution(s1, mu_1, sigma_1) *
+             distribution(f2, mu_2, sigma_2) *
+             distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+             det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
+                                         distribution(s1, mu_1, sigma_1) *
+                                         distribution(f2, mu_2, sigma_2) *
+                                         distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+                                         det(s0, s1, f2, t)) ** 2)
 
     domain = [
         [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
         [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
         [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
-        [0, 18],
-        [0, 2]
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2]
     ]
     result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
     return result.item()
@@ -142,10 +152,10 @@ def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
 def expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(l):
 
-        return l*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t)
+        return torch.atan(l*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))/(1+(l*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))**2)
 
     domain = [
-        [0, 50]
+        [-np.pi / 2, np.pi / 2]
     ]
     result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
     return result.item()
@@ -175,18 +185,22 @@ def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
 
         s0, s1, f2, h, l = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return (distribution(s0, mu_0, sigma_0) *
-                              distribution(s1, mu_1, sigma_1) *
-                              distribution(f2, mu_2, sigma_2) *
-                              distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                              det(s0, s1, f2, t))
+        return torch.atan((distribution(s0, mu_0, sigma_0) *
+                           distribution(s1, mu_1, sigma_1) *
+                           distribution(f2, mu_2, sigma_2) *
+                           distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+                           det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
+                                                        distribution(s1, mu_1, sigma_1) *
+                                                        distribution(f2, mu_2, sigma_2) *
+                                                        distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
+                                                        det(s0, s1, f2, t)) ** 2)
 
     domain = [
         [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
         [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
         [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
-        [0, 18],
-        [0, 50]
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2]
     ]
     result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
     return result.item()
@@ -194,10 +208,10 @@ def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
 def expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(p):
 
-        return p*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t)
+        return torch.atan(p*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))/(1+(p*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))**2)
 
     domain = [
-        [0, 2]
+        [-np.pi / 2, np.pi / 2]
     ]
     result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
     return result.item()
@@ -250,17 +264,16 @@ def average_expectation_p0(mu_3, sigma_3):
 
 
 
-def addition(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, p0i, t):
-    suma = 0
+def addition(params, h, l, p, p0i, t):
+    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
+    suma = torch.tensor(0.0, requires_grad=True)
     for i in range(len(h)):
-        suma += (
-                h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])**2 +
-                l[i] - average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])**2 +
-                p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])**2 +
-                p0i - average_expectation_p0(mu_3, sigma_3)
-                )
+        term_h = (h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+        term_l = (l[i] - average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+        term_p = (p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+        term_p0 = (p0i - average_expectation_p0(mu_3, sigma_3)) ** 2
+        suma = suma + term_h + term_l + term_p + term_p0
     return suma
-
 
 
 def starting_points(h,l,p,t):
@@ -284,3 +297,34 @@ def starting_points(h,l,p,t):
     sigma_2 = np.sqrt(variance_2)
 
     return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 10, 1])
+
+
+
+def optimize_addition(h, l, p, p0i, t):
+    initial_params = torch.tensor(starting_points(h, l, p, t), requires_grad=True)
+
+    optimizer = torch.optim.Adam([initial_params], lr=0.01)
+
+    # Optimization loop
+    for i in range(1000):
+        optimizer.zero_grad()
+        loss = addition(initial_params, h, l, p, p0i, t)
+        loss.backward()
+        optimizer.step()
+
+        if i % 10 == 0:
+            mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = initial_params.detach().numpy()
+            print(f"Iteration {i}: Loss = {loss.item():.4f}, mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
+                  f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
+                  f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+    return initial_params.detach().numpy()
+
+def main():
+    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3=optimize_addition(h,l,p,10,t)
+    print(f"mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
+          f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, "
+          f"mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
+          f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+
+if __name__ == '__main__':
+    main()
