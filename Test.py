@@ -305,26 +305,33 @@ def optimize_addition(h, l, p, p0i, t):
 
     optimizer = torch.optim.Adam([initial_params], lr=0.01)
 
-    # Optimization loop
-    for i in range(1000):
-        optimizer.zero_grad()
-        loss = addition(initial_params, h, l, p, p0i, t)
-        loss.backward()
-        optimizer.step()
+    with open("optimization_progress.txt", "w") as f:
 
-        if i % 10 == 0:
-            mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = initial_params.detach().numpy()
-            print(f"Iteration {i}: Loss = {loss.item():.4f}, mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
-                  f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
-                  f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+        # Optimization loop
+        for i in range(1000):
+            optimizer.zero_grad()
+            loss = addition(initial_params, h, l, p, p0i, t)
+            loss.backward()
+            optimizer.step()
+
+            if i % 10 == 0:
+                mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = initial_params.detach().numpy()
+                result = (f"Iteration {i}: Loss = {loss.item():.4f}, mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
+                      f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
+                      f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+                print(result)
+                f.write(result + "\n")  # Write to file
     return initial_params.detach().numpy()
 
 def main():
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3=optimize_addition(h,l,p,10,t)
-    print(f"mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
-          f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, "
-          f"mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
-          f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+    with open("optimization_result.txt", "w") as r:
+        result = (f"mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
+              f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, "
+              f"mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
+              f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
+        print(result)
+        r.write(result + "\n")
 
 if __name__ == '__main__':
     main()
