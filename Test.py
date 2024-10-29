@@ -1,10 +1,11 @@
 import torch
 from functools import lru_cache
-from autoray.lazy import arctan
 from torch.distributions import Normal
 from torchquad import set_up_backend
 from torchquad.integration.monte_carlo import MonteCarlo
 import numpy as np
+from scipy import optimize
+
 
 h=[9,17,18] #,26,23,20,19,12,6,10,1,1,1]
 l=[3,14,50] #,74,56,40,126,40,37,36,48,76,91]
@@ -273,7 +274,16 @@ def addition(params, h, l, p, p0i, t):
         term_p = (p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
         term_p0 = (p0i - average_expectation_p0(mu_3, sigma_3)) ** 2
         suma = suma + term_h + term_l + term_p + term_p0
-    return suma
+
+    print(f"Function value: {suma}")
+    print("Parameters:")
+    print(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})")
+    print(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})")
+    print(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})")
+    print(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})")
+    print("-" * 60)
+
+    return suma.detach().numpy()
 
 
 def starting_points(h,l,p,t):
@@ -298,40 +308,18 @@ def starting_points(h,l,p,t):
 
     return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 10, 1])
 
-
-
-def optimize_addition(h, l, p, p0i, t):
-    initial_params = torch.tensor(starting_points(h, l, p, t), requires_grad=True)
-
-    optimizer = torch.optim.Adam([initial_params], lr=0.01)
-
-    with open("optimization_progress.txt", "w") as f:
-
-        # Optimization loop
-        for i in range(1000):
-            optimizer.zero_grad()
-            loss = addition(initial_params, h, l, p, p0i, t)
-            loss.backward()
-            optimizer.step()
-
-            if i % 10 == 0:
-                mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = initial_params.detach().numpy()
-                result = (f"Iteration {i}: Loss = {loss.item():.4f}, mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
-                      f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
-                      f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
-                print(result)
-                f.write(result + "\n")  # Write to file
-    return initial_params.detach().numpy()
-
 def main():
-    mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3=optimize_addition(h,l,p,10,t)
-    with open("optimization_result.txt", "w") as r:
-        result = (f"mu_0 = {mu_0:.4f}, sigma_0 = {sigma_0:.4f}, "
-              f"mu_1 = {mu_1:.4f}, sigma_1 = {sigma_1:.4f}, "
-              f"mu_2 = {mu_2:.4f}, sigma_2 = {sigma_2:.4f}, "
-              f"mu_3 = {mu_3:.4f}, sigma_3 = {sigma_3:.4f}")
-        print(result)
-        r.write(result + "\n")
+    initial = starting_points(h,l,p,t)
+
+    result = optimize.minimize(
+        fun=addition,
+        x0=initial,
+        args=(h, l, p, 10, t),
+        method='nelder-mead',
+    )
+    print("\nOptimización Completada:")
+    print(result)
+
 
 if __name__ == '__main__':
     main()
