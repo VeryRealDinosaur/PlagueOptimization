@@ -73,15 +73,11 @@ def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
 
         s0, s1, f2, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return torch.atan((distribution(s0, mu_0, sigma_0) *
+        return (distribution(s0, mu_0, sigma_0) *
              distribution(s1, mu_1, sigma_1) *
              distribution(f2, mu_2, sigma_2) *
-             distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-             det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
-                                         distribution(s1, mu_1, sigma_1) *
-                                         distribution(f2, mu_2, sigma_2) *
-                                         distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                                         det(s0, s1, f2, t)) ** 2)
+             distribution(p0(s0, s1, f2, h, torch.atan(l), torch.atan(p), t), mu_3, sigma_3) *
+             det(s0, s1, f2, t))/((1+l**2)*(1 +p**2))
 
 
     domain = [
@@ -97,7 +93,7 @@ def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
 def expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(h):
 
-        return torch.atan(h*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))/(1+(h*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))**2)
+        return (torch.atan(h)*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))/(1+h**2)
 
     domain = [
         [-np.pi / 2, np.pi / 2]
@@ -130,15 +126,11 @@ def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
 
         s0, s1, f2, h, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return torch.atan((distribution(s0, mu_0, sigma_0) *
-             distribution(s1, mu_1, sigma_1) *
-             distribution(f2, mu_2, sigma_2) *
-             distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-             det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
-                                         distribution(s1, mu_1, sigma_1) *
-                                         distribution(f2, mu_2, sigma_2) *
-                                         distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                                         det(s0, s1, f2, t)) ** 2)
+        return (distribution(s0, mu_0, sigma_0) *
+                distribution(s1, mu_1, sigma_1) *
+                distribution(f2, mu_2, sigma_2) *
+                distribution(p0(s0, s1, f2, torch.atan(h), l, torch.atan(p), t), mu_3, sigma_3) *
+                det(s0, s1, f2, t)) / ((1 + h ** 2)*(1 + p ** 2))
 
     domain = [
         [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
@@ -153,7 +145,7 @@ def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
 def expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(l):
 
-        return torch.atan(l*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))/(1+(l*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))**2)
+        return (torch.atan(l)*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))/(1+l**2)
 
     domain = [
         [-np.pi / 2, np.pi / 2]
@@ -186,15 +178,11 @@ def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
 
         s0, s1, f2, h, l = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
 
-        return torch.atan((distribution(s0, mu_0, sigma_0) *
-                           distribution(s1, mu_1, sigma_1) *
-                           distribution(f2, mu_2, sigma_2) *
-                           distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                           det(s0, s1, f2, t))) / (1 + (distribution(s0, mu_0, sigma_0) *
-                                                        distribution(s1, mu_1, sigma_1) *
-                                                        distribution(f2, mu_2, sigma_2) *
-                                                        distribution(p0(s0, s1, f2, h, l, p, t), mu_3, sigma_3) *
-                                                        det(s0, s1, f2, t)) ** 2)
+        return (distribution(s0, mu_0, sigma_0) *
+                distribution(s1, mu_1, sigma_1) *
+                distribution(f2, mu_2, sigma_2) *
+                distribution(p0(s0, s1, f2, torch.atan(h), torch.atan(l), p, t), mu_3, sigma_3) *
+                det(s0, s1, f2, t)) / ((1 + h ** 2)*(1 + l ** 2))
 
     domain = [
         [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
@@ -209,7 +197,7 @@ def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
 def expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(p):
 
-        return torch.atan(p*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))/(1+(p*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))**2)
+        return (torch.atan(p)*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))/(1+ p ** 2 )
 
     domain = [
         [-np.pi / 2, np.pi / 2]
@@ -236,7 +224,7 @@ def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sig
 
 
 
-def expectation_p0(mu_3, sigma_3):
+"""def expectation_p0(mu_3, sigma_3):
     def integrand(p_0):
         return p_0*distribution(p_0, mu_3, sigma_3)
 
@@ -261,27 +249,38 @@ def average_expectation_p0(mu_3, sigma_3):
     print("Variance:   {:.6e}".format(variance))
     print("Std Dev:    {:.6e}".format(std_dev))
 
-    return mean
+    return mean"""
 
 
 
-def addition(params, h, l, p, p0i, t):
+def addition(params, h, l, p, t):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
     suma = torch.tensor(0.0, requires_grad=True)
-    for i in range(len(h)):
-        term_h = (h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
-        term_l = (l[i] - average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
-        term_p = (p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
-        term_p0 = (p0i - average_expectation_p0(mu_3, sigma_3)) ** 2
-        suma = suma + term_h + term_l + term_p + term_p0
 
-    print(f"Function value: {suma}")
-    print("Parameters:")
-    print(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})")
-    print(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})")
-    print(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})")
-    print(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})")
-    print("-" * 60)
+    file_path = "OptimumValues.txt"
+    with open(file_path, "w") as file:
+
+        for i in range(len(h)):
+            term_h = (h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            term_l = (l[i] - average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            term_p = (p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            suma = suma + term_h + term_l + term_p
+
+        print(f"Function value: {suma}")
+        print("Parameters:")
+        print(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})")
+        print(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})")
+        print(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})")
+        print(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})")
+        print("-" * 60)
+
+        file.write(f"Function value: {suma}\n")
+        file.write("Parameters:\n")
+        file.write(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})\n")
+        file.write(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})\n")
+        file.write(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})\n")
+        file.write(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})\n")
+        file.write("-" * 60 + "\n")
 
     return suma.detach().numpy()
 
@@ -306,7 +305,7 @@ def starting_points(h,l,p,t):
     sigma_1 = np.sqrt(variance_1)
     sigma_2 = np.sqrt(variance_2)
 
-    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 10, 1])
+    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1])
 
 def main():
     initial = starting_points(h,l,p,t)
@@ -314,7 +313,7 @@ def main():
     result = optimize.minimize(
         fun=addition,
         x0=initial,
-        args=(h, l, p, 10, t),
+        args=(h, l, p, t),
         method='nelder-mead',
     )
     print("\nOptimización Completada:")
