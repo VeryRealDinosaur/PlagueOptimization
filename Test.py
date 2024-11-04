@@ -7,10 +7,10 @@ import numpy as np
 from scipy import optimize
 
 
-h=[9,17,18] #,26,23,20,19,12,6,10,1,1,1]
-l=[3,14,50] #,74,56,40,126,40,37,36,48,76,91]
-p=[1,1,2] #,1,1,1,3,4,2,1,5,2,9]
-t=[7,10,14] #,17,21,25,29,32,36,40,45,52,57]
+h=[9,17,18,26,23,20,19,12,6,10,1,1,1]
+l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
+p=[1,1,2,1,1,1,3,4,2,1,5,2,9]
+t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
 
 set_up_backend("torch", data_type="float64")
 
@@ -257,8 +257,8 @@ def addition(params, h, l, p, t):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
     suma = torch.tensor(0.0, requires_grad=True)
 
-    file_path = "OptimumValues.txt"
-    with open(file_path, "w") as file:
+    file_path = "/Users/jovany/PycharmProjects/PlagueOptimization/OptimumValues.txt"
+    with open(file_path, "a") as file:
 
         for i in range(len(h)):
             term_h = (h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
@@ -304,6 +304,8 @@ def starting_points(h,l,p,t):
     sigma_0 = np.sqrt(variance_0)
     sigma_1 = np.sqrt(variance_1)
     sigma_2 = np.sqrt(variance_2)
+
+    print(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1)
 
     return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1])
 
