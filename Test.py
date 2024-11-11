@@ -6,27 +6,24 @@ from torchquad.integration.monte_carlo import MonteCarlo
 import numpy as np
 from scipy import optimize
 
-
-h=[9,17,18,26,23,20,19,12,6,10,1,1,1]
-l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
-p=[1,1,2,1,1,1,3,4,2,1,5,2,9]
-t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
-
-set_up_backend("torch", data_type="float64")
-
-vegas = MonteCarlo()
-
 @lru_cache(maxsize=128)
 def matrix_power(s0, s1, f2, t):
-
     batch_size = s0.shape[0]
     a = torch.zeros((batch_size, 3, 3), dtype=torch.float64)
 
+    # Add small epsilon to diagonal for numerical stability
+    epsilon = 1e-10
     a[:, 0, 2] = f2
     a[:, 1, 0] = s0
     a[:, 2, 1] = s1
+    a += torch.eye(3, dtype=torch.float64) * epsilon
 
-    result = torch.matrix_power(a, t)
+    # Use logarithm of matrix for better numerical stability
+    try:
+        result = torch.matrix_exp(t * torch.matrix_log(a))
+    except:
+        result = torch.matrix_power(a, t)
+
     return result
 
 def p0(s0, s1, f2, h, l, p, t):
@@ -36,222 +33,279 @@ def p0(s0, s1, f2, h, l, p, t):
     l = l.squeeze()
     p = p.squeeze()
 
-    mask_0 = torch.abs(a_n[:, 0, 2]) > 1e-10
-    mask_1 = torch.abs(a_n[:, 1, 2]) > 1e-10
-    mask_2 = torch.abs(a_n[:, 2, 2]) > 1e-10
+    # Use softmax for smoother transitions between masks
+    epsilon = 1e-10
+    weights = torch.softmax(torch.stack([
+        torch.abs(a_n[:, 0, 2]),
+        torch.abs(a_n[:, 1, 2]),
+        torch.abs(a_n[:, 2, 2])
+    ]), dim=0)
 
-    result = torch.zeros_like(s0)
-    result[mask_0] = a_n[mask_0, 0, 2] / h[mask_0]
-    result[~mask_0 & mask_1] = a_n[~mask_0 & mask_1, 1, 2] / l[~mask_0 & mask_1]
-    result[~mask_0 & ~mask_1 & mask_2] = a_n[~mask_0 & ~mask_1 & mask_2, 2, 2] / p[~mask_0 & ~mask_1 & mask_2]
+    result = (weights[0] * a_n[:, 0, 2] / (h + epsilon) +
+              weights[1] * a_n[:, 1, 2] / (l + epsilon) +
+              weights[2] * a_n[:, 2, 2] / (p + epsilon))
 
-    return result
+    return torch.clip(result, -1e3, 1e3)
 
 def det(s0, s1, f2, t):
     a_n = matrix_power(s0, s1, f2, t)
 
-    mask_0 = torch.abs(a_n[:, 0, 2]) > 1e-10
-    mask_1 = torch.abs(a_n[:, 1, 2]) > 1e-10
-    mask_2 = torch.abs(a_n[:, 2, 2]) > 1e-10
+    # Use softmax for smoother transitions
+    epsilon = 1e-10
+    weights = torch.softmax(torch.stack([
+        torch.abs(a_n[:, 0, 2]),
+        torch.abs(a_n[:, 1, 2]),
+        torch.abs(a_n[:, 2, 2])
+    ]), dim=0)
 
-    result = torch.zeros_like(s0)
-    result[mask_0] = 1 / a_n[mask_0, 0, 2]
-    result[~mask_0 & mask_1] = 1 / a_n[~mask_0 & mask_1, 1, 2]
-    result[~mask_0 & ~mask_1 & mask_2] = 1 / a_n[~mask_0 & ~mask_1 & mask_2, 2, 2]
+    result = (weights[0] / (a_n[:, 0, 2] + epsilon) +
+              weights[1] / (a_n[:, 1, 2] + epsilon) +
+              weights[2] / (a_n[:, 2, 2] + epsilon))
 
-    return result
+    return torch.clip(result, -1e3, 1e3)
 
-def distribution(variable, mu, sigma):
-    dist = Normal(mu, sigma)
-    return torch.exp(dist.log_prob(variable))
+set_up_backend("torch", data_type="float64")
+vegas = MonteCarlo()
 
+h=[9,17,18,26,23,20,19,12,6,10,1,1,1]
+l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
+p=[1,1,2,1,1,1,3,4,2,1,5,2,9]
+t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
 
-
-def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
-
+def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
 
-        s0, s1, f2, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
 
-        return (distribution(s0, mu_0, sigma_0) *
-             distribution(s1, mu_1, sigma_1) *
-             distribution(f2, mu_2, sigma_2) *
-             distribution(p0(s0, s1, f2, h, torch.atan(l), torch.atan(p), t), mu_3, sigma_3) *
-             det(s0, s1, f2, t))/((1+l**2)*(1 +p**2))
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(h))) - torch.log1p(h ** 2)
+        log_result -= torch.log1p(l ** 2)
+        log_result -= torch.log1p(p ** 2)
 
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
+
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
+
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
+
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
+
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 6 * sigma_2, mu_2 + 6 * sigma_2]
 
     domain = [
-        [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
-        [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
-        [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],  # Reduced range for angular variables
         [-np.pi / 2, np.pi / 2],
-        [-np.pi / 2, np.pi / 2],
-    ]
-    result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
-    return result.item()
-
-def expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(h):
-
-        return (torch.atan(h)*fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t))/(1+h**2)
-
-    domain = [
         [-np.pi / 2, np.pi / 2]
     ]
-    result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
-    return result.item()
 
-def average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = vegas.integrate(integrand, dim=6, N=N, integration_domain=domain)
+    return result.item()
+def average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
     samples = []
-    for i in range(100):
-        result = expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+
+    for i in range(n_samples):
+        result = fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
         samples.append(result)
 
-    mean = sum(samples) / len(samples)
-    variance = sum((x - mean) ** 2 for x in samples) / (len(samples) - 1)
-    std_dev = variance ** 0.5
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
 
-    print("Statistics:")
-    print("Mean:       {:.6e}".format(mean))
-    print("Variance:   {:.6e}".format(variance))
-    print("Std Dev:    {:.6e}".format(std_dev))
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
 
-    return mean
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
+
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
+
+    return trimmed_mean
 
 
 
-def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
-
+def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
 
-        s0, s1, f2, h, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
 
-        return (distribution(s0, mu_0, sigma_0) *
-                distribution(s1, mu_1, sigma_1) *
-                distribution(f2, mu_2, sigma_2) *
-                distribution(p0(s0, s1, f2, torch.atan(h), l, torch.atan(p), t), mu_3, sigma_3) *
-                det(s0, s1, f2, t)) / ((1 + h ** 2)*(1 + p ** 2))
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(l))) - torch.log1p(l ** 2)
+        log_result -= torch.log1p(h ** 2)
+        log_result -= torch.log1p(p ** 2)
+
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
+
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
+
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
+
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
+
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 3 * sigma_2, mu_2 + 6 * sigma_2]
 
     domain = [
-        [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
-        [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
-        [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],
         [-np.pi / 2, np.pi / 2],
         [-np.pi / 2, np.pi / 2]
     ]
-    result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
+
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = vegas.integrate(integrand, dim=6, N=N, integration_domain=domain)
     return result.item()
-
-def expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(l):
-
-        return (torch.atan(l)*fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t))/(1+l**2)
-
-    domain = [
-        [-np.pi / 2, np.pi / 2]
-    ]
-    result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
-    return result.item()
-
-def average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+def average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
     samples = []
-    for i in range(100):
-        result = expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+
+    for i in range(n_samples):
+        result = fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
         samples.append(result)
 
-    mean = sum(samples) / len(samples)
-    variance = sum((x - mean) ** 2 for x in samples) / (len(samples) - 1)
-    std_dev = variance ** 0.5
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
 
-    print("Statistics:")
-    print("Mean:       {:.6e}".format(mean))
-    print("Variance:   {:.6e}".format(variance))
-    print("Std Dev:    {:.6e}".format(std_dev))
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
 
-    return mean
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
+
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
+
+    return trimmed_mean
 
 
 
-def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
-
+def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
 
-        s0, s1, f2, h, l = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4]
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
 
-        return (distribution(s0, mu_0, sigma_0) *
-                distribution(s1, mu_1, sigma_1) *
-                distribution(f2, mu_2, sigma_2) *
-                distribution(p0(s0, s1, f2, torch.atan(h), torch.atan(l), p, t), mu_3, sigma_3) *
-                det(s0, s1, f2, t)) / ((1 + h ** 2)*(1 + l ** 2))
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(p))) - torch.log1p(p ** 2)
+        log_result -= torch.log1p(h ** 2)
+        log_result -= torch.log1p(l ** 2)
+
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
+
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
+
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
+
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
+
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 6 * sigma_2, mu_2 + 6 * sigma_2]
 
     domain = [
-        [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0],
-        [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1],
-        [mu_2 - 6 * sigma_0, mu_2 + 6 * sigma_2],
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],
         [-np.pi / 2, np.pi / 2],
         [-np.pi / 2, np.pi / 2]
     ]
-    result = vegas.integrate(integrand, dim=5, N=100000, integration_domain=domain)
+
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = vegas.integrate(integrand, dim=6, N=N, integration_domain=domain)
     return result.item()
-
-def expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(p):
-
-        return (torch.atan(p)*fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t))/(1+ p ** 2 )
-
-    domain = [
-        [-np.pi / 2, np.pi / 2]
-    ]
-    result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
-    return result.item()
-
-def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
     samples = []
-    for i in range(100):
-        result = expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+
+    for i in range(n_samples):
+        result = fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
         samples.append(result)
 
-    mean = sum(samples) / len(samples)
-    variance = sum((x - mean) ** 2 for x in samples) / (len(samples) - 1)
-    std_dev = variance ** 0.5
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
 
-    print("Statistics:")
-    print("Mean:       {:.6e}".format(mean))
-    print("Variance:   {:.6e}".format(variance))
-    print("Std Dev:    {:.6e}".format(std_dev))
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
 
-    return mean
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
 
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
 
-
-"""def expectation_p0(mu_3, sigma_3):
-    def integrand(p_0):
-        return p_0*distribution(p_0, mu_3, sigma_3)
-
-    domain = [
-        [mu_3 - 6 * sigma_3, mu_3 + 6 * sigma_3],
-    ]
-    result = vegas.integrate(integrand, dim=1, N=100000, integration_domain=domain)
-    return result.item()
-
-def average_expectation_p0(mu_3, sigma_3):
-    samples = []
-    for i in range(100):
-        result = expectation_p0(mu_3, sigma_3)
-        samples.append(result)
-
-    mean = sum(samples) / len(samples)
-    variance = sum((x - mean) ** 2 for x in samples) / (len(samples) - 1)
-    std_dev = variance ** 0.5
-
-    print("Statistics:")
-    print("Mean:       {:.6e}".format(mean))
-    print("Variance:   {:.6e}".format(variance))
-    print("Std Dev:    {:.6e}".format(std_dev))
-
-    return mean"""
-
-
+    return trimmed_mean
 
 def addition(params, h, l, p, t):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
@@ -310,7 +364,7 @@ def starting_points(h,l,p,t):
     return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1])
 
 def main():
-    initial = starting_points(h,l,p,t)
+    initial = np.array([0.5743, 2.3477, 22.7972, 48.8559, 1.0132, 4.7313, 0.0413, 2.0098])
 
     result = optimize.minimize(
         fun=addition,

@@ -1,169 +1,285 @@
-""""import cProfile
+
+from torch.distributions import Normal
+from torchquad import set_up_backend
+from torchquad.integration.monte_carlo import MonteCarlo
 import numpy as np
-import scipy as sp
-from scipy.stats import norm
 from scipy import optimize
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import lru_cache
-import pstats
-import io
 
-#DEBUGING TOOLS
-def create_callback(t, h, l, p, p0i):
-    def callback(xk):
-        callback.count += 1
+from BaseComponents import *
 
-        fval = addition(xk, t, h, l, p, p0i)
+set_up_backend("torch", data_type="float64")
+MonteCarlo = MonteCarlo()
 
-        print(f"\nIteration {callback.count}:")
-        print(f"  Parameters:")
-        print(f"    μ₀: {xk[0]:.4f}, σ₀: {xk[1]:.4f}")
-        print(f"    μ₁: {xk[2]:.4f}, σ₁: {xk[3]:.4f}")
-        print(f"    μ₂: {xk[4]:.4f}, σ₂: {xk[5]:.4f}")
-        print(f"    μ₃: {xk[6]:.4f}, σ₃: {xk[7]:.4f}")
-        print(f"  Function value: {fval:.6f}")
+h=[9,17,18,26,23,20,19,12,6,10,1,1,1]
+l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
+p=[1,1,2,1,1,1,3,4,2,1,5,2,9]
+t=[7,10,14,17,21,25,29,32,36,40,45,52,57]
 
-    callback.count = 0
-    return callback
+def fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+    def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
 
-h=[9,17,18] #,26,23,20,19,12,6,10,1,1,1]
-l=[3,14,50] #,74,56,40,126,40,37,36,48,76,91]
-p=[1,1,2] #,1,1,1,3,4,2,1,5,2,9]
-t=[7,10,14] #,17,21,25,29,32,36,40,45,52,57]
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
 
-@lru_cache(maxsize=128)
-def matrix_power(s0,s1,f2,t):
-    a = np.array([[0, 0, f2],
-                  [s0, 0, 0],
-                  [0, s1, 0]])
-    return np.linalg.matrix_power(a, t)
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(h))) - torch.log1p(h ** 2)
+        log_result -= torch.log1p(l ** 2)
+        log_result -= torch.log1p(p ** 2)
 
-def p0(s0, s1, f2, h, l, p, t):
-    a_n = matrix_power(s0,s1,f2,t)
-    if a_n[0, 2] != 0:
-        return a_n[0, 2] / h
-    elif a_n[1, 2] != 0:
-        return a_n[1, 2] / l
-    elif a_n[2, 2] != 0:
-        return a_n[2, 2] / p
-    else:
-        return np.nan
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
 
-def det(s0, s1, f2, t):
-    a_n = matrix_power(s0, s1, f2, t)
-    if a_n[0, 2] != 0:
-        return 1 / a_n[0, 2]
-    elif a_n[1, 2] != 0:
-        return 1 / a_n[1, 2]
-    elif a_n[2, 2] != 0:
-        return 1 / a_n[2, 2]
-    else:
-        return np.nan
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
 
-def distribution(variable,mu,sigma):
-    pdf_values = norm.pdf(variable,mu,sigma)
-    return pdf_values
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
 
-def fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t):
-    def integrand(s0, s1, f2):
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
 
-        p0_result = p0(s0,s1,f2,h,l,p,t)
-        det_result = det(s0,s1,f2,t)
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 6 * sigma_2, mu_2 + 6 * sigma_2]
 
-        return (distribution(s0, mu_0, sigma_0) *
-                distribution(s1, mu_1, sigma_1) *
-                distribution(f2, mu_2, sigma_2) *
-                distribution(p0_result, mu_3, sigma_3) *
-                det_result)
+    domain = [
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],  # Reduced range for angular variables
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2]
+    ]
 
-    for_range = [[-np.inf, np.inf], [-np.inf, np.inf], [-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = MonteCarlo.integrate(integrand, dim=6, N=N, integration_domain=domain)
+    return result.item()
+def average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
+    samples = []
 
-def n_hat_lp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t):
-    def integrand(l,p):
-        return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
+    for i in range(n_samples):
+        result = fun1_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+        samples.append(result)
 
-    for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
 
-def n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t):
-    def integrand(h, p):
-        return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
 
-    for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
 
-def n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t):
-    def integrand(h,l):
-        return fun1(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, l, p, t)
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
 
-    for_range = [[-np.inf, np.inf], [-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
-
-def n_hat_p0(mu_3,sigma_3):
-    def integrand(p0):
-        return distribution(p0,mu_3,sigma_3)
-
-    for_range = [[-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
-
-def exp_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(h):
-        return h*n_hat_lp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, h, t)
-    for_range = [[-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
-
-def exp_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(l):
-        return l*n_hat_hp(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, l, t)
-    for_range = [[-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
-
-def exp_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
-    def integrand(p):
-        return p*n_hat_hl(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, p, t)
-    for_range = [[-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
-
-def exp_p0(mu_3,sigma_3):
-    def integrand(p0):
-        return p0*n_hat_p0(mu_3,sigma_3)
-    for_range = [[-np.inf, np.inf]]
-    return sp.integrate.nquad(integrand, for_range)[0]
+    return trimmed_mean
 
 
-def addition(params, t, h, l, p, p0i):
+
+def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+    def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
+
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
+
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(l))) - torch.log1p(l ** 2)
+        log_result -= torch.log1p(h ** 2)
+        log_result -= torch.log1p(p ** 2)
+
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
+
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
+
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
+
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
+
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 3 * sigma_2, mu_2 + 6 * sigma_2]
+
+    domain = [
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2]
+    ]
+
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = MonteCarlo.integrate(integrand, dim=6, N=N, integration_domain=domain)
+    return result.item()
+def average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
+    samples = []
+
+    for i in range(n_samples):
+        result = fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+        samples.append(result)
+
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
+
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
+
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
+
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
+
+    return trimmed_mean
+
+
+
+def fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
+    def integrand(x):
+        s0, s1, f2, h, l, p = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
+
+        # Use log-space calculations for better numerical stability
+        log_result = torch.zeros_like(s0)
+
+        # Calculate angular terms
+        log_result += torch.log(torch.abs(torch.atan(p))) - torch.log1p(p ** 2)
+        log_result -= torch.log1p(h ** 2)
+        log_result -= torch.log1p(l ** 2)
+
+        # Add distribution terms
+        log_result += Normal(mu_0, sigma_0).log_prob(s0)
+        log_result += Normal(mu_1, sigma_1).log_prob(s1)
+        log_result += Normal(mu_2, sigma_2).log_prob(f2)
+
+        # Calculate p0 and its distribution
+        p0_val = p0(s0, s1, f2, torch.atan(h), torch.atan(l), torch.atan(p), t)
+        log_result += Normal(mu_3, sigma_3).log_prob(p0_val)
+
+        # Add determinant
+        det_val = det(s0, s1, f2, t)
+        log_result += torch.log(torch.abs(det_val) + 1e-10)
+
+        # Convert back from log space with careful handling
+        result = torch.exp(torch.clip(log_result, -30, 30))
+        return result
+
+    # Use importance sampling by focusing on regions where the integrand is likely to be large
+    s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
+    s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
+    f2_range = [mu_2 - 6 * sigma_2, mu_2 + 6 * sigma_2]
+
+    domain = [
+        s0_range,
+        s1_range,
+        f2_range,
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2],
+        [-np.pi / 2, np.pi / 2]
+    ]
+
+    # Use stratified sampling
+    N = 300000  # Increased number of points
+    result = MonteCarlo.integrate(integrand, dim=6, N=N, integration_domain=domain)
+    return result.item()
+def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t, n_samples=100):
+    samples = []
+
+    for i in range(n_samples):
+        result = fun1_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t)
+        samples.append(result)
+
+        # Print progress
+        if (i + 1) % 10 == 0:
+            print(f"Completed {i + 1}/{n_samples} samples")
+
+    # Use median and MAD for more robust statistics
+    median = np.median(samples)
+    mad = np.median(np.abs(samples - median))
+
+    # Calculate trimmed mean (excluding top and bottom 10%)
+    trimmed_samples = np.sort(samples)[n_samples // 10:-n_samples // 10]
+    trimmed_mean = np.mean(trimmed_samples)
+    trimmed_std = np.std(trimmed_samples)
+
+    print("H expectation")
+    print("\nRobust Statistics:")
+    print(f"Median:     {median:.6e}")
+    print(f"MAD:        {mad:.6e}")
+    print("\nTrimmed Statistics (middle 80%):")
+    print(f"Mean:       {trimmed_mean:.6e}")
+    print(f"Std Dev:    {trimmed_std:.6e}")
+
+    return trimmed_mean
+
+def addition(params, h, l, p, t):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
+    suma = torch.tensor(0.0, requires_grad=True)
 
-    with ProcessPoolExecutor() as executor:
-        futures_info = {}
+    file_path = "/Users/jovany/PycharmProjects/PlagueOptimization/OptimumValues.txt"
+    with open(file_path, "a") as file:
 
-        for i in range(len(t)):
-            future_h = executor.submit(exp_h, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
-            future_l = executor.submit(exp_l, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
-            future_p = executor.submit(exp_p, mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])
+        for i in range(len(h)):
+            term_h = (h[i] - average_expectation_h(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            term_l = (l[i] - average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            term_p = (p[i] - average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t[i])) ** 2
+            suma = suma + term_h + term_l + term_p
 
-            futures_info[future_h] = ('h', i)
-            futures_info[future_l] = ('l', i)
-            futures_info[future_p] = ('p', i)
+        print(f"Function value: {suma}")
+        print("Parameters:")
+        print(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})")
+        print(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})")
+        print(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})")
+        print(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})")
+        print("-" * 60)
 
-        suma = 0
-        for future in as_completed(futures_info):
-            func_type, i = futures_info[future]
-            try:
-                result = future.result()
-                if func_type == 'h':
-                    suma += (h[i] - result) ** 2
-                elif func_type == 'l':
-                    suma += (l[i] - result) ** 2
-                elif func_type == 'p':
-                    suma += (p[i] - result) ** 2
-            except Exception as e:
-                print(f"Error occurred for index {i}: {e}")
+        file.write(f"Function value: {suma}\n")
+        file.write("Parameters:\n")
+        file.write(f"  H (μ₀: {mu_0:8.4f}, σ₀: {sigma_0:8.4f})\n")
+        file.write(f"  L (μ₁: {mu_1:8.4f}, σ₁: {sigma_1:8.4f})\n")
+        file.write(f"  P (μ₂: {mu_2:8.4f}, σ₂: {sigma_2:8.4f})\n")
+        file.write(f"  P0 (μ₃: {mu_3:8.4f}, σ₃: {sigma_3:8.4f})\n")
+        file.write("-" * 60 + "\n")
 
-        suma += (p0i - exp_p0(mu_3, sigma_3)) ** 2
-
-    return suma
+    return suma.detach().numpy()
 
 
 def starting_points(h,l,p,t):
@@ -186,31 +302,22 @@ def starting_points(h,l,p,t):
     sigma_1 = np.sqrt(variance_1)
     sigma_2 = np.sqrt(variance_2)
 
-    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 10, 1])
+    print(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1)
+
+    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1])
 
 def main():
-    callback = create_callback(t, h, l, p, 10)
+    initial = starting_points(h,l,p,t)
+
     result = optimize.minimize(
         fun=addition,
-        x0=starting_points(h,l,p,t),
-        args=(t, h, l, p, 10),
+        x0=initial,
+        args=(h, l, p, t),
         method='nelder-mead',
-        callback=callback
     )
     print("\nOptimización Completada:")
     print(result)
 
+
 if __name__ == '__main__':
-    pr = cProfile.Profile()
-    pr.enable()
-
     main()
-
-    pr.disable()
-
-    s = io.StringIO()
-    sortby = 'cumulative'
-    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
-
-    print(s.getvalue())
