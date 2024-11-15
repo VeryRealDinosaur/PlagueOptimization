@@ -291,6 +291,8 @@ def main():
 
     print(matrix_power(5, 4, 7, 7))
 
+    print(det(5, 4, 7, 7,))
+
     print(p0(5,4,7,2,4,7,7))
 
     result = optimize.minimize(

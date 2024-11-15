@@ -49,19 +49,16 @@ def p0(s0, s1, f2, h, l, p, t):
 
 def det(s0, s1, f2, t):
     a_n = matrix_power(s0, s1, f2, t)
-
     last_column = a_n[:, :, 2]  # Select the last column
 
     # Get the largest value and the row index for each matrix in the batch
     max_values, row_indices = torch.max(last_column, dim=1)
 
-    for i in range(len(max_values)):
-        if row_indices[i] == 0:
-            result = 1/ max_values[i]
-        elif row_indices[i] == 1:
-            result = 1/ max_values[i]
-        elif row_indices[i] == 2:
-            result = 1/ max_values[i]
-        # Use modified_value as needed
+    # Create result tensor and assign the inverse of max_values based on row_indices
+    result = torch.empty_like(max_values, dtype=torch.float64)
+    result[row_indices == 0] = 1 / max_values[row_indices == 0]
+    result[row_indices == 1] = 1 / max_values[row_indices == 1]
+    result[row_indices == 2] = 1 / max_values[row_indices == 2]
+
     return result
 
