@@ -25,26 +25,26 @@ def matrix_power(s0, s1, f2, t):
     return result
 
 def p0(s0, s1, f2, h, l, p, t):
+    if not isinstance(h, torch.Tensor):
+        h = torch.tensor([h], dtype=torch.float64)
+    if not isinstance(l, torch.Tensor):
+        l = torch.tensor([l], dtype=torch.float64)
+    if not isinstance(p, torch.Tensor):
+        p = torch.tensor([p], dtype=torch.float64)
+
     a_n = matrix_power(s0, s1, f2, t)
-
-    h = h.squeeze()
-    l = l.squeeze()
-    p = p.squeeze()
-
     last_column = a_n[:, :, 2]  # Select the last column
 
     # Get the largest value and the row index for each matrix in the batch
     max_values, row_indices = torch.max(last_column, dim=1)
 
-    for i in range(len(max_values)):
-        if row_indices[i] == 0:
-            result = max_values[i] / h
-        elif row_indices[i] == 1:
-            result = max_values[i] / l
-        elif row_indices[i] == 2:
-            result = max_values[i] / p
-        # Use modified_value as needed
-    return result
+    # Create results tensor and assign values based on row_indices
+    results = torch.empty_like(max_values, dtype=torch.float64)
+    results[row_indices == 0] = max_values[row_indices == 0] / h[row_indices == 0]
+    results[row_indices == 1] = max_values[row_indices == 1] / l[row_indices == 1]
+    results[row_indices == 2] = max_values[row_indices == 2] / p[row_indices == 2]
+
+    return results
 
 
 def det(s0, s1, f2, t):

@@ -4,11 +4,12 @@ from torchquad import set_up_backend
 from torchquad.integration.monte_carlo import MonteCarlo
 import numpy as np
 from scipy import optimize
+from torchquad.integration.vegas import VEGAS
 
 from BaseComponents import *
 
 set_up_backend("torch", data_type="float64")
-MonteCarlo = MonteCarlo()
+MonteCarlo = VEGAS()
 
 h=[9,17,18,26,23,20,19,12,6,10,1,1,1]
 l=[3,14,50,74,56,40,126,40,37,36,48,76,91]
@@ -289,6 +290,8 @@ def main():
     initial = np.array([0.5743, 2.3477, 22.7972, 48.8559, 1.0132, 4.7313, 0.0413, 2.0098])
 
     print(matrix_power(5, 4, 7, 7))
+
+    print(p0(5,4,7,2,4,7,7))
 
     result = optimize.minimize(
         fun=addition,
