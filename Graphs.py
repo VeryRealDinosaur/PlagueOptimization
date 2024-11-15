@@ -30,6 +30,7 @@ def matrix_power(s0, s1, f2, t):
 def p0(s0, s1, f2, h, l, p, t):
     a_n = matrix_power(s0, s1, f2, t)
 
+    h = h.squeeze()
     l = l.squeeze()
     p = p.squeeze()
 

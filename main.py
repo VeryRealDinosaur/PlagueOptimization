@@ -126,7 +126,7 @@ def fun1_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3, t):
     # Use importance sampling by focusing on regions where the integrand is likely to be large
     s0_range = [mu_0 - 6 * sigma_0, mu_0 + 6 * sigma_0]
     s1_range = [mu_1 - 6 * sigma_1, mu_1 + 6 * sigma_1]
-    f2_range = [mu_2 - 3 * sigma_2, mu_2 + 6 * sigma_2]
+    f2_range = [mu_2 - 6 * sigma_2, mu_2 + 6 * sigma_2]
 
     domain = [
         s0_range,
@@ -161,7 +161,7 @@ def average_expectation_l(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sig
     trimmed_mean = np.mean(trimmed_samples)
     trimmed_std = np.std(trimmed_samples)
 
-    print("H expectation")
+    print("L expectation")
     print("\nRobust Statistics:")
     print(f"Median:     {median:.6e}")
     print(f"MAD:        {mad:.6e}")
@@ -240,7 +240,7 @@ def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sig
     trimmed_mean = np.mean(trimmed_samples)
     trimmed_std = np.std(trimmed_samples)
 
-    print("H expectation")
+    print("P expectation")
     print("\nRobust Statistics:")
     print(f"Median:     {median:.6e}")
     print(f"MAD:        {mad:.6e}")
@@ -249,6 +249,8 @@ def average_expectation_p(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sig
     print(f"Std Dev:    {trimmed_std:.6e}")
 
     return trimmed_mean
+
+
 
 def addition(params, h, l, p, t):
     mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, mu_3, sigma_3 = params
@@ -282,32 +284,11 @@ def addition(params, h, l, p, t):
     return suma.detach().numpy()
 
 
-def starting_points(h,l,p,t):
-    h_np=np.array(h)
-    l_np=np.array(l)
-    p_np=np.array(p)
-    t_np=np.array(t)
-
-    delta_t_np=np.diff(t_np)
-
-    mu_0 = np.average(h_np[1:], weights=delta_t_np)
-    mu_1 = np.average(l_np[1:], weights=delta_t_np)
-    mu_2 = np.average(p_np[1:], weights=delta_t_np)
-
-    variance_0 = np.average((h_np[1:] - mu_0)**2, weights=delta_t_np)
-    variance_1 = np.average((l_np[1:] - mu_1)**2, weights=delta_t_np)
-    variance_2 = np.average((p_np[1:] - mu_2)**2, weights=delta_t_np)
-
-    sigma_0 = np.sqrt(variance_0)
-    sigma_1 = np.sqrt(variance_1)
-    sigma_2 = np.sqrt(variance_2)
-
-    print(mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1)
-
-    return np.array([mu_0, sigma_0, mu_1, sigma_1, mu_2, sigma_2, 1, 1])
 
 def main():
-    initial = starting_points(h,l,p,t)
+    initial = np.array([0.5743, 2.3477, 22.7972, 48.8559, 1.0132, 4.7313, 0.0413, 2.0098])
+
+    print(matrix_power(5, 4, 7, 7))
 
     result = optimize.minimize(
         fun=addition,
