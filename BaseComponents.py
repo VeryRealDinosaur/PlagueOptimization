@@ -1,6 +1,5 @@
 import torch
 from functools import lru_cache
-from torch.distributions import Normal
 
 @lru_cache(maxsize=128)
 def matrix_power(s0, s1, f2, t):
@@ -14,54 +13,57 @@ def matrix_power(s0, s1, f2, t):
     batch_size = s0.shape[0]
     a = torch.zeros((batch_size, 3, 3), dtype=torch.float64)
 
-    # Add small epsilon to diagonal for numerical stability
-    epsilon = 1e-10
-    a[:, 0, 2] = f2
-    a[:, 1, 0] = s0
-    a[:, 2, 1] = s1
+    epsilon = 1e-100
+    a[:, 0, 1] = 1/s0
+    a[:, 1, 2] = 1/s1
+    a[:, 2, 0] = 1/f2
     a += torch.eye(3, dtype=torch.float64) * epsilon
 
     result = torch.matrix_power(a, t)
 
     return result
 
-def p0(s0, s1, f2, h, l, p, t):
-    if not isinstance(h, torch.Tensor):
-        h = torch.tensor([h], dtype=torch.float64)
-    if not isinstance(l, torch.Tensor):
-        l = torch.tensor([l], dtype=torch.float64)
-    if not isinstance(p, torch.Tensor):
-        p = torch.tensor([p], dtype=torch.float64)
+def matrix_product(s0, s1, f2, h, l, p, t, case):
+    def ensure_tensor(x):
+        if not isinstance(x, torch.Tensor):
+            x = torch.tensor([x], dtype=torch.float64)
+        return x.squeeze()
+
+    s0 = ensure_tensor(s0)
+    s1 = ensure_tensor(s1)
+    f2 = ensure_tensor(f2)
+    h = ensure_tensor(h)
+    l = ensure_tensor(l)
+    p = ensure_tensor(p)
+
+    # Create a batch tensor if inputs have different batch sizes
+    batch_size = max(s0.numel(), s1.numel(), f2.numel(), h.numel(), l.numel(), p.numel())
+
+    # Broadcast tensors to the same batch size
+    s0 = s0.repeat(batch_size) if s0.numel() == 1 else s0
+    s1 = s1.repeat(batch_size) if s1.numel() == 1 else s1
+    f2 = f2.repeat(batch_size) if f2.numel() == 1 else f2
+    h = h.repeat(batch_size) if h.numel() == 1 else h
+    l = l.repeat(batch_size) if l.numel() == 1 else l
+    p = p.repeat(batch_size) if p.numel() == 1 else p
+
+    # Create vector b with broadcasting
+    b = torch.zeros((batch_size, 3, 1), dtype=torch.float64)
+    b[:, 0, 0] = h
+    b[:, 1, 0] = l
+    b[:, 2, 0] = p
 
     # Compute matrix power
-    a_n = matrix_power(s0, s1, f2, t)
-    last_column = a_n[:, :, 2]  # Select the last column
+    a = matrix_power(s0, s1, f2, t)
 
-    # Get the largest value and the row index for each matrix in the batch
-    max_values, row_indices = torch.max(last_column, dim=1)
+    # Perform matrix multiplication for each batch
+    product = torch.bmm(a, b)
 
-    # Initialize the results tensor
-    results = torch.zeros_like(max_values, dtype=torch.float64)
-
-    # Divide max_values by the corresponding h, l, or p
-    epsilon = torch.tensor(1e-10, dtype=torch.float64)
-    results[row_indices == 0] = max_values[row_indices == 0] / torch.maximum(h[row_indices == 0], epsilon)
-    results[row_indices == 1] = max_values[row_indices == 1] / torch.maximum(l[row_indices == 1], epsilon)
-    results[row_indices == 2] = max_values[row_indices == 2] / torch.maximum(p[row_indices == 2], epsilon)
-
-    return results
+    return product[:, case, 0]
 
 def det(s0, s1, f2, t):
-    a_n = matrix_power(s0, s1, f2, t)
-    last_column = a_n[:, :, 2]  # Select the last column
-
-    max_values, row_indices = torch.max(last_column, dim=1)
-    epsilon = torch.tensor(1e-10, dtype=torch.float64)
-    log_max_values = torch.log(torch.maximum(max_values, epsilon))
-
-    # Assign the negative log for inverse effect
-    log_result = -log_max_values
-    return torch.exp(torch.clip(log_result, -30, 30))
+    det = (1 / s0 * s1 * f2) ** -t
+    return abs(det)
 
 def distribution(variable, mu, sigma):
 
@@ -71,3 +73,4 @@ def distribution(variable, mu, sigma):
     dist = torch.distributions.normal.Normal(mu, sigma)
     result = torch.exp(dist.log_prob(variable))
     return result
+
